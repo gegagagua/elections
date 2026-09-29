@@ -1,0 +1,13 @@
+.DS_Store
+.idea/
+.vscode/
+.zed/
+*.log
+
+# Sensitive data — real customer records with PII
+admin/database/*.sqlite
+admin/database/*.sqlite-journal
+
+# Uploaded customer images (PII)
+admin/storage/app/public/customers/*
+!admin/storage/app/public/customers/.gitkeep
