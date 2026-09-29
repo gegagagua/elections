@@ -123,7 +123,7 @@
             <table class="table table-hover align-middle mb-0">
                 <thead>
                     <tr>
-                        <th style="width:56px;">სურათი</th>
+                        <th style="width:80px;">სურათი</th>
                         <th>{!! $sortLink('first_name', 'სახელი') !!}</th>
                         <th>{!! $sortLink('last_name', 'გვარი') !!}</th>
                         <th>პირადობა</th>
@@ -140,10 +140,10 @@
                                 @if ($customer->image_url)
                                     <a href="{{ $customer->image_url }}" target="_blank">
                                         <img src="{{ $customer->image_url }}" alt=""
-                                             style="width:40px;height:40px;object-fit:cover;border-radius:6px;">
+                                             style="width:64px;height:64px;object-fit:cover;border-radius:8px;">
                                     </a>
                                 @else
-                                    <span class="text-muted"><i class="bi bi-person-circle fs-4"></i></span>
+                                    <span class="text-muted"><i class="bi bi-person-circle" style="font-size:64px;"></i></span>
                                 @endif
                             </td>
                             <td>{{ $customer->first_name }}</td>

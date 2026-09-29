@@ -3,7 +3,14 @@
 namespace App\Support;
 
 use App\Models\Customer;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Worksheet\BaseDrawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing as WsDrawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\MemoryDrawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use RuntimeException;
 
 /**
@@ -15,16 +22,21 @@ use RuntimeException;
  *
  * Header row is auto-detected inside the first 10 rows (case-insensitive).
  * Blank leading columns (like the numbering column in the source file) are ignored.
+ *
+ * Embedded images anchored to any cell in the same row are extracted and attached
+ * to the customer's image_path. Rows are upserted by (district_id, personal_id) so
+ * the import is safe to re-run.
  */
 class CustomerExcelImporter
 {
     /**
-     * @return array{created:int, skipped:int}
+     * @return array{created:int, updated:int, skipped:int, images:int}
      */
     public static function import(string $filePath, int $districtId, int $adminId): array
     {
         $spreadsheet = IOFactory::load($filePath);
-        $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+        $sheet = $spreadsheet->getActiveSheet();
+        $rows = $sheet->toArray(null, true, true, false);
 
         if (empty($rows)) {
             throw new RuntimeException('ფაილი ცარიელია');
@@ -38,8 +50,12 @@ class CustomerExcelImporter
             );
         }
 
+        $drawingsByRow = self::indexDrawingsByRow($sheet);
+
         $created = 0;
+        $updated = 0;
         $skipped = 0;
+        $images = 0;
 
         $total = count($rows);
         for ($i = $headerRowIndex + 1; $i < $total; $i++) {
@@ -61,20 +77,112 @@ class CustomerExcelImporter
                 continue;
             }
 
-            Customer::create([
-                'admin_id' => $adminId,
-                'district_id' => $districtId,
+            // Excel rows are 1-indexed, and our $rows array is 0-indexed.
+            $excelRowNumber = $i + 1;
+            $imagePath = null;
+            if (isset($drawingsByRow[$excelRowNumber])) {
+                $imagePath = self::extractDrawing($drawingsByRow[$excelRowNumber]);
+                if ($imagePath !== null) {
+                    $images++;
+                }
+            }
+
+            $existing = Customer::where('district_id', $districtId)
+                ->where('personal_id', $personalId)
+                ->first();
+
+            $attributes = [
                 'first_name' => $firstName,
                 'last_name' => $lastName,
-                'personal_id' => $personalId,
                 'address' => $address !== '' ? $address : null,
                 'phone' => $phone !== '' ? $phone : null,
-                'status' => Customer::STATUS_NOT_CALLED,
-            ]);
-            $created++;
+            ];
+
+            if ($existing) {
+                if ($imagePath !== null) {
+                    if ($existing->image_path) {
+                        Storage::disk('public')->delete($existing->image_path);
+                    }
+                    $attributes['image_path'] = $imagePath;
+                }
+                $existing->update($attributes);
+                $updated++;
+            } else {
+                Customer::create([
+                    ...$attributes,
+                    'admin_id' => $adminId,
+                    'district_id' => $districtId,
+                    'personal_id' => $personalId,
+                    'image_path' => $imagePath,
+                    'status' => Customer::STATUS_NOT_CALLED,
+                ]);
+                $created++;
+            }
         }
 
-        return ['created' => $created, 'skipped' => $skipped];
+        return [
+            'created' => $created,
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'images' => $images,
+        ];
+    }
+
+    /**
+     * @return array<int, BaseDrawing>
+     */
+    private static function indexDrawingsByRow(Worksheet $sheet): array
+    {
+        $index = [];
+        foreach ($sheet->getDrawingCollection() as $drawing) {
+            $coords = $drawing->getCoordinates();
+            if (! $coords) {
+                continue;
+            }
+            [, $rowNumber] = Coordinate::coordinateFromString($coords);
+            $index[(int) $rowNumber] = $drawing;
+        }
+
+        return $index;
+    }
+
+    private static function extractDrawing(BaseDrawing $drawing): ?string
+    {
+        $extension = strtolower($drawing->getExtension() ?: 'jpg');
+        if ($extension === 'jpeg') {
+            $extension = 'jpg';
+        }
+        $relative = 'customers/'.Str::random(40).'.'.$extension;
+
+        try {
+            if ($drawing instanceof WsDrawing) {
+                $bytes = @file_get_contents($drawing->getPath());
+                if ($bytes === false || $bytes === '') {
+                    return null;
+                }
+                Storage::disk('public')->put($relative, $bytes);
+
+                return $relative;
+            }
+
+            if ($drawing instanceof MemoryDrawing) {
+                $resource = $drawing->getImageResource();
+                if (! $resource) {
+                    return null;
+                }
+                ob_start();
+                imagejpeg($resource, null, 85);
+                $bytes = ob_get_clean();
+                $relative = preg_replace('/\.\w+$/', '.jpg', $relative);
+                Storage::disk('public')->put($relative, $bytes);
+
+                return $relative;
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return null;
     }
 
     /**

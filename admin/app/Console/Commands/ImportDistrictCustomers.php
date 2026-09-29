@@ -47,7 +47,7 @@ class ImportDistrictCustomers extends Command
             return self::FAILURE;
         }
 
-        $this->info("Imported: {$result['created']} customer(s). Skipped: {$result['skipped']}.");
+        $this->info("Created: {$result['created']}, updated: {$result['updated']}, skipped: {$result['skipped']}, images attached: {$result['images']}.");
 
         return self::SUCCESS;
     }

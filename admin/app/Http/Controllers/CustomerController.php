@@ -198,9 +198,14 @@ class CustomerController extends Controller
             return back()->withErrors(['file' => $e->getMessage()]);
         }
 
+        $msg = "იმპორტი: დაემატა {$result['created']}, განახლდა {$result['updated']}, გამოტოვდა {$result['skipped']}";
+        if (! empty($result['images'])) {
+            $msg .= ", სურათი {$result['images']}";
+        }
+
         return redirect()
             ->route('districts.customers.index', $district)
-            ->with('status', "იმპორტი: დაემატა {$result['created']}, გამოტოვდა {$result['skipped']}");
+            ->with('status', $msg);
     }
 
     private function validateCustomer(Request $request): array
